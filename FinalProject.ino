@@ -16,12 +16,11 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   if(Serial.available()){
-    sendData("AT+CIPSEND=0,21\r\n", 2000, DEBUG);
-    sendData("<h1>Hello world!</h1>\r\n", 2000, DEBUG);
-    sendData("AT+CIPCLOSE=0\r\n", 2000, DEBUG);
+    sendData("AT+CIPSEND=0,21\r\n", 2000, DEBUG); // Requires 0, bytes to send (Sample: hello world)
+    sendData("<h1>Hello world!</h1>\r\n", 2000, DEBUG); // Sample text
+    sendData("AT+CIPCLOSE=0\r\n", 2000, DEBUG); // Close to finish sending
   }
 }
-
 
 String sendData(String command, const int timeout, boolean debug) {
   String response = "";
@@ -34,11 +33,8 @@ String sendData(String command, const int timeout, boolean debug) {
       response+=c;
       }
   }
-  
-  if(debug)
-  {
+  if(debug) {
   Serial.print(response);
   }
-  
   return response;
 }
