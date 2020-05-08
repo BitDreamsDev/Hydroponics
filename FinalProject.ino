@@ -1,6 +1,6 @@
 #define DEBUG false
 String AP_SSID = "SSID";
-String AP_PASSWORD = "PASSORD";
+String AP_PASSWORD = "PASSWORD";
 int RST_WAIT_TIME = 5000;
 int WAIT_TIME = 5000;
 boolean is_wifi_setup = false;
