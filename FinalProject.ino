@@ -1,7 +1,7 @@
 #define DEBUG true
 #include <SoftwareSerial.h>
-String AP_SSID = "Whenever You Think";
-String AP_PASSWORD = "30443044";
+String AP_SSID = "YOUR_SSID";
+String AP_PASSWORD = "YOUR_PASSWORD";
 int RST_WAIT_TIME = 5000;
 int WAIT_TIME = 5000;
 boolean is_wifi_setup = false;
