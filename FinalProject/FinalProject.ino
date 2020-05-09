@@ -1,101 +1,157 @@
-#define DEBUG true
-#include <SoftwareSerial.h>
-String AP_SSID = "YOUR_SSID";
-String AP_PASSWORD = "YOUR_PASSWORD";
-int RST_WAIT_TIME = 5000;
-int WAIT_TIME = 5000;
-boolean is_wifi_setup = false;
-SoftwareSerial wifiComm(2,3); // RX, TX
+// line ending
+#define CRLF "\r\n"
 
+// timing
+#define SUCCESS_RATE 2000
+#define ERROR_RATE 200
+#define LOOP_RATE 1000
+#define BAUD_RATE 9600
 
-void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(9600);
-  wifiComm.begin(9600);
+// error codes
+#define SUCCESS 1
+#define E_RST 2
+#define E_CWMODE 3
+#define E_CIFSR 4
+#define E_CIPMUX 5
+#define E_CIPSERVER 6
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  Serial.print("Starting\r\n");
+// configuration
+#define AP_SSID "YOUR_SSID"
+#define AP_PASSWORD "YOUR_PASSWORD"
+
+// prototypes
+void blink(int nrBlinks, int rate);
+bool sendCommand(char *command, char *ack);
+void fail(int errnum);
+
+// global state
+bool g_failed = false;
+int g_errnum = 0;
+
+void setup()
+{
+    pinMode(LED_BUILTIN, OUTPUT);
+    Serial.begin(BAUD_RATE);
+    delay(1000);
+
+    // reset module
+    if (!sendCommand("AT+RST", "Ready")) {
+        fail(E_RST);
+        return;
+    }
+
+    // configure as access point
+    if (!sendCommand("AT+CWMODE=2", "OK")) {
+        fail(E_CWMODE);
+        return;
+    }
+
+    // get ip address
+    if (!sendCommand("AT+CIFSR", "OK")) {
+        fail(E_CIFSR);
+        return;
+    }
+
+    // configure for multiple connections
+    if (!sendCommand("AT+CIPMUX=1", "OK")) {
+        fail(E_CIPMUX);
+        return;
+    }
+
+    // turn on server on port 80
+    if (!sendCommand("AT+CIPSERVER=1,80", "OK")) {
+        fail(E_CIPSERVER);
+        return;
+    }
+
+    // setup is complete, blink once to indicate success
+    blink(SUCCESS, SUCCESS_RATE);
 }
 
-void loop() {
-  if(!is_wifi_setup){
-    delay(2000);
-    blink_n(10);
-    delay(2000);
-    if(sendData("AT+RST\r\n", RST_WAIT_TIME, DEBUG)){
-      blink_n(4);
+void loop()
+{
+    // runs every LOOP_RATE ms
+    delay(LOOP_RATE);
+
+    // setup failed, blink the error code until the user restarts
+    // the board
+    if (g_failed) {
+        blink(g_errnum, ERROR_RATE);
+        continue;
     }
-    if(sendData("AT+CWMODE=1\r\n",WAIT_TIME, DEBUG)){
-      blink_n(6);
-    }
-    if(sendData("AT+CWJAP=\"" + AP_SSID + "\",\"" + AP_PASSWORD + "\"\r\n", WAIT_TIME, DEBUG)){
-      blink_n(8);
-    }
-    if(sendData("AT+CIPMUX=1\r\n", WAIT_TIME, DEBUG)){
-      blink_n(10);
-    }
-    if(sendData("AT+CIPSERVER=1,80\r\n", WAIT_TIME, DEBUG)){
-      blink_n(12);
-    }
-    is_wifi_setup = true;
-  }
-  
-   //put your main code here, to run repeatedly:
-  if(wifiComm.available()){
-    delay(1000);
-    String response = "";
-    while(wifiComm.available() > 0){      
-      char c = wifiComm.read(); // Clear buffer cause we don't care about the connect IDs
-      response += c;
-    }
-    response = "";
 
     // Send web page info
-    sendData("AT+CIPSEND=0,21\r\n", 2000, DEBUG);
-    sendData("<h1>Hello World!</h1>\r\n", 2000, DEBUG);
-    sendData("AT+CIPCLOSE=0\r\n", 2000, DEBUG);
-  }
+    sendCommand("AT+CIPSEND=0,21", "OK");
+    Serial.println("<h1>Hello World!</h1>");
+    sendCommand("AT+CIPCLOSE=0", "OK");
 }
 
+/**
+ * Sends a command over serial, and waits for a response. This
+ * function is synchronous.
+ *
+ * command - the data/command to send;
+ *
+ * ack     - the expected response; must be of non-zero length
+ *
+ * Returns true if the expected response was received
+ */
+bool sendCommand(const char *command, const char *ack)
+{
+    // send the command
+    Serial.print(command);
+    Serial.print(CRLF);
 
-boolean sendData(String command, const int timeout, boolean debug) {
-  Serial.print("Attempting to send " + command + "\r\n");
-  blink_n(2);
-  boolean was_serial_available = false;
-  String response = "";
-  wifiComm.print(command);
-  wifiComm.listen();
-  long int time = millis();
-  while( (time+timeout) > millis()){
-    while(wifiComm.available() > 0){
-      was_serial_available = true;
-      //Serial.print("We hit the codeblock!\r\n");
-      // The esp has data so display its output to the serial window
-      char c = wifiComm.read(); // read the next character.
-      response+=c;
+    // match the acknowledgement:
+
+    // scan the stream for the beginning of the response
+    for(;;) {
+        // wait for data
+        while (!Serial.available());
+
+        // discard characters until we've found the first in the ack
+        if (ack[0] == Serial.read()) {
+            break;
+        }
     }
-  }
-  
-  if(debug)
-  {
-  Serial.print(response);
-  }
-  return was_serial_available;
+
+    // ensure the rest of the token is present after that
+    int i = 1;
+    for (; i < strlen(ack) - 1; i++) {
+        // match each character to the next in the stream
+        while(!Serial.available());
+        char ch = Serial.read();
+
+        // if at any point the response doesn't match, fail
+        if (ack[i] != ch) {
+            return false;
+        }
+    }
+
+    // We'll be permissive and not check the CRLF here, since it's a PITA
+    // to send a CRLF with PuTTY. We will assume anything after the correct
+    // response is a CRLF. It will be discarded on the next sendCommand()
+    // when we seek to the begginning of the ack.
+
+    // if we reach this point, we have matched the ack
+    return true;
 }
 
-// the loop function runs over and over again forever
-void blink_n(int number_of_blinks) {
-  for(int i=0;i<number_of_blinks;i++){
-    digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
-    delay(100);                       // wait for a second
-    digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
-    delay(100);                       // wait for a second
-  }
+/** fail fast; when there is a problem we'll loop the error code
+    so the user can restart the arduino */
+void fail(int errnum) {
+    g_errnum = errnum;
+    g_failed = true;
 }
 
-void blink_error(){
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(50);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(50);
+/** Blinks the built-in led `nrBlinks' times at `rate' */
+void blink(int nrBlinks, int rate)
+{
+    // turn the LED on and off
+    for(int i = 0; i < nrBlinks; i++) {
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(rate);
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(rate);
+    }
 }
