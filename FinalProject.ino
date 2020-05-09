@@ -1,4 +1,4 @@
-#define DEBUG false
+#define DEBUG true
 #include <SoftwareSerial.h>
 String AP_SSID = "Whenever You Think";
 String AP_PASSWORD = "30443044";
@@ -40,14 +40,21 @@ void loop() {
     is_wifi_setup = true;
   }
   
-  // put your main code here, to run repeatedly:
-//  if(Serial.available()){
-//    delay(1000);
-//    Serial.read(); // Clear buffer cause we don't care about the connect IDs
-//    sendData("AT+CIPSEND=0,21\r\n", 2000, DEBUG);
-//    sendData("<h1>Hello World!</h1>\r\n", 2000, DEBUG);
-//    sendData("AT+CIPCLOSE=0\r\n", 2000, DEBUG);
-//  }
+   //put your main code here, to run repeatedly:
+  if(wifiComm.available()){
+    delay(1000);
+    String response = "";
+    while(wifiComm.available() > 0){      
+      char c = wifiComm.read(); // Clear buffer cause we don't care about the connect IDs
+      response += c;
+    }
+    response = "";
+
+    // Send web page info
+    sendData("AT+CIPSEND=0,21\r\n", 2000, DEBUG);
+    sendData("<h1>Hello World!</h1>\r\n", 2000, DEBUG);
+    sendData("AT+CIPCLOSE=0\r\n", 2000, DEBUG);
+  }
 }
 
 
@@ -62,7 +69,7 @@ boolean sendData(String command, const int timeout, boolean debug) {
   while( (time+timeout) > millis()){
     while(wifiComm.available() > 0){
       was_serial_available = true;
-      Serial.print("We hit the codeblock!\r\n");
+      //Serial.print("We hit the codeblock!\r\n");
       // The esp has data so display its output to the serial window
       char c = wifiComm.read(); // read the next character.
       response+=c;
