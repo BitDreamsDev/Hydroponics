@@ -1,7 +1,7 @@
 Wire                    |ARD                        <->ESP8266
 ---------------------------------------------------------------
-WHITE - 0               : RX                        <->RX
-BLK - 1                 : TX                        <->TX
+WHITE - 0               : RX                        <->TX
+BLK - 1                 : TX                        <->RX
 BLUE - RST              : RESET                     <->RST
 RED- 3v3                : 3.3V                      <-> 3v3
 ORANGE - 3v3            : 3.3V                      <-> 3v3
