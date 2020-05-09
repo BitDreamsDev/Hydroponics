@@ -1,28 +1,42 @@
+#include <stdio.h>
+
 // line ending
 #define CRLF "\r\n"
 
 // timing
-#define SUCCESS_RATE 2000
+#define TIMEOUT 5000
+#define SUCCESS_RATE 500
 #define ERROR_RATE 200
 #define LOOP_RATE 1000
+
+// you should change the baud rate of the ESP 8266, use the following
+// AT command:
+//            AT+UART_DEF=9600,8,1,0,0
+//
+// this change is persistent
 #define BAUD_RATE 9600
 
 // error codes
 #define SUCCESS 1
+
 #define E_RST 2
 #define E_CWMODE 3
 #define E_CIFSR 4
 #define E_CIPMUX 5
 #define E_CIPSERVER 6
+#define E_CWJAP 7
+#define E_CIPCLOSE 8
+#define E_CIPSEND 9
 
 // configuration
-#define AP_SSID "YOUR_SSID"
-#define AP_PASSWORD "YOUR_PASSWORD"
+#define AP_SSID "Meeseeks"
+#define AP_PASSWORD "3X1573NC315P41N"
 
 // prototypes
 void blink(int nrBlinks, int rate);
 bool sendCommand(char *command, char *ack);
 void fail(int errnum);
+bool waitForTimeout();
 
 // global state
 bool g_failed = false;
@@ -40,17 +54,25 @@ void setup()
         return;
     }
 
-    // configure as access point
-    if (!sendCommand("AT+CWMODE=2", "OK")) {
+    // configure as client
+    if (!sendCommand("AT+CWMODE=1", "OK")) {
         fail(E_CWMODE);
         return;
     }
 
-    // get ip address
-    if (!sendCommand("AT+CIFSR", "OK")) {
-        fail(E_CIFSR);
+    // authenticate
+    char cmd[64] = {0};
+    snprintf(cmd, sizeof cmd, "AT+CWJAP=\"%s\",\"%s\"", AP_SSID, AP_PASSWORD);
+    if (!sendCommand((const char *) cmd, "OK")) {
+        fail(E_CWJAP);
         return;
     }
+
+    // get ip address
+    //    if (!sendCommand("AT+CIFSR", "OK")) {
+    //    fail(E_CIFSR);
+    //    return;
+    //}
 
     // configure for multiple connections
     if (!sendCommand("AT+CIPMUX=1", "OK")) {
@@ -70,20 +92,25 @@ void setup()
 
 void loop()
 {
-    // runs every LOOP_RATE ms
-    delay(LOOP_RATE);
-
     // setup failed, blink the error code until the user restarts
     // the board
     if (g_failed) {
         blink(g_errnum, ERROR_RATE);
-        continue;
+        return;
     }
 
     // Send web page info
-    sendCommand("AT+CIPSEND=0,21", "OK");
+    if (!sendCommand("AT+CIPSEND=0,21", "OK")) {
+        fail(E_CIPSEND);
+        return;
+    }
+
     Serial.println("<h1>Hello World!</h1>");
-    sendCommand("AT+CIPCLOSE=0", "OK");
+
+    if (!sendCommand("AT+CIPCLOSE=0", "OK")) {
+        fail(E_CIPCLOSE);
+        return;
+    }
 }
 
 /**
@@ -104,14 +131,22 @@ bool sendCommand(const char *command, const char *ack)
 
     // match the acknowledgement:
 
-    // scan the stream for the beginning of the response
+    // scan the stream for the beginning of the response, this also
+    // needs its own timeout to prevent denial of service
+    unsigned long t1 = millis();
     for(;;) {
         // wait for data
-        while (!Serial.available());
+        if (!waitForTimeout()) return false;
 
         // discard characters until we've found the first in the ack
         if (ack[0] == Serial.read()) {
             break;
+        }
+
+        // check if the specific timeout was exceeded (we should timeout not
+        // only waiting for data here, but waiting for the right data)
+        if (t1 + TIMEOUT < millis()) {
+            return false;
         }
     }
 
@@ -119,7 +154,7 @@ bool sendCommand(const char *command, const char *ack)
     int i = 1;
     for (; i < strlen(ack) - 1; i++) {
         // match each character to the next in the stream
-        while(!Serial.available());
+        if (!waitForTimeout()) return false;
         char ch = Serial.read();
 
         // if at any point the response doesn't match, fail
@@ -154,4 +189,15 @@ void blink(int nrBlinks, int rate)
         digitalWrite(LED_BUILTIN, LOW);
         delay(rate);
     }
+}
+
+/** polls serial bus for data until TIMEOUT, returns false on failure
+    to acquire data */
+bool waitForTimeout() {
+    unsigned long t1 = millis();
+    bool timedOut = false;
+    while (!Serial.available() && !timedOut) {
+        timedOut = t1 + TIMEOUT < millis();
+    }
+    return !timedOut;
 }
