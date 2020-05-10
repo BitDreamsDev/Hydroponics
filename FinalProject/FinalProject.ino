@@ -3,7 +3,12 @@
 // line ending
 #define CRLF "\r\n"
 
+// limits
+#define PAGE_MAX 64
+#define CMD_MAX 64
+
 // timing
+#define REQUEST_DELAY 20
 #define TIMEOUT 10000
 #define SUCCESS_RATE 500
 #define ERROR_RATE 200
@@ -23,6 +28,7 @@
 #define E_CWJAP 7
 #define E_CIPCLOSE 8
 #define E_CIPSEND 9
+#define E_ACCEPT 10
 
 // configuration
 #define AP_SSID "Meeseeks"
@@ -33,6 +39,7 @@ void blink(int nrBlinks, int rate);
 bool sendCommand(char *command, char *ack);
 void fail(int errnum);
 int readNext();
+bool findToken(const char *token);
 
 // global state
 bool g_failed = false;
@@ -59,16 +66,10 @@ void setup()
     // authenticate
     char cmd[64] = {0};
     snprintf(cmd, sizeof cmd, "AT+CWJAP=\"%s\",\"%s\"", AP_SSID, AP_PASSWORD);
-    if (!sendCommand((const char *) cmd, "OK")) {
+    if (!sendCommand((const char *) cmd, "WIFI CONNECTED")) {
         fail(E_CWJAP);
         return;
     }
-
-    // get ip address
-    //    if (!sendCommand("AT+CIFSR", "OK")) {
-    //    fail(E_CIFSR);
-    //    return;
-    //}
 
     // configure for multiple connections
     if (!sendCommand("AT+CIPMUX=1", "OK")) {
@@ -97,17 +98,51 @@ void loop()
         return;
     }
 
-    // Send web page info
-    if (!sendCommand("AT+CIPSEND=0,21", "OK")) {
-        fail(E_CIPSEND);
-        return;
-    }
+    // handle TCP connections as they arrive
+    if(findToken("+IPD,"))
+    {
+        // read connection id
+        int ch = -1;
+        int connId = -1;
+        if ((ch = readNext()) != -1) {
+            connId = ch - '0';
+        } else {
+            fail(E_ACCEPT);
+            return;
+        }
 
-    Serial.println("<h1>Hello World!</h1>");
+        blink(1, ERROR_RATE);
 
-    if (!sendCommand("AT+CIPCLOSE=0", "OK")) {
-        fail(E_CIPCLOSE);
-        return;
+        // handle HTTP requests
+        if (findToken("GET /")) {
+            // generate web page
+            char page[PAGE_MAX] = {0};
+            snprintf(page, sizeof page, "<h1>Hello, World!</h1>%s", CRLF);
+
+            // send CIPSEND command
+            char cmd[CMD_MAX] = {0};
+            snprintf(cmd, sizeof cmd, "AT+CIPSEND=%d,%d", connId, strlen(page));
+            if (!sendCommand((const char *) cmd, "OK")) {
+                blink(3, ERROR_RATE);
+                return;
+            }
+
+            // send webpage
+            delay(REQUEST_DELAY);
+            if (!sendCommand((const char *) page, "SEND OK")) {
+                blink(4, ERROR_RATE);
+                return;
+            }
+
+            // close HTTP connection
+            memset(cmd, 0, sizeof cmd);
+            snprintf(cmd, sizeof cmd, "AT+CIPCLOSE=%d", connId);
+
+            if (!sendCommand((const char *)cmd, "OK")) {
+                blink(5, ERROR_RATE);
+                return;
+            }
+        }
     }
 }
 
@@ -126,8 +161,11 @@ bool sendCommand(const char *command, const char *ack)
     // send the command
     Serial.print(command);
     Serial.print(CRLF);
+    return findToken(ack);
+}
 
-
+/** seeks to the next occurrence of token, or times out */
+bool findToken(const char *token) {
     // scan the stream for the beginning of the response, this also
     // needs its own timeout to prevent denial of service
     unsigned long t1 = millis();
@@ -135,8 +173,8 @@ bool sendCommand(const char *command, const char *ack)
     while(1) {
         // try to match the token
         int ch, i = 0;
-        while ((ch = readNext()) != -1 && i < strlen(ack)) {
-            if (ch == ack[i]) {
+        while (i < strlen(token) && (ch = readNext()) != -1) {
+            if (ch == token[i]) {
                 i++;
             } else {
                 i = 0;
@@ -147,7 +185,7 @@ bool sendCommand(const char *command, const char *ack)
             return false;
         }
 
-        if (i == strlen(ack)) {
+        if (i == strlen(token)) {
             return true;
         }
     }
@@ -176,13 +214,12 @@ void blink(int nrBlinks, int rate)
 int readNext() {
     unsigned long t1 = millis();
     bool timedOut = false;
+
     while (!Serial.available() && !timedOut) {
         timedOut = t1 + TIMEOUT < millis();
     }
 
-    if (timedOut) {
-        return -1;
-    } else {
-        return Serial.read();
-    }
+    // we don't need to check the timeout here because Serial.read() will
+    // return -1 if there isn't anything buffered
+    return Serial.read();
 }
