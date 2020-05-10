@@ -4,7 +4,7 @@
 #define CRLF "\r\n"
 
 // timing
-#define TIMEOUT 5000
+#define TIMEOUT 10000
 #define SUCCESS_RATE 500
 #define ERROR_RATE 200
 #define LOOP_RATE 1000
@@ -14,7 +14,7 @@
 //            AT+UART_DEF=9600,8,1,0,0
 //
 // this change is persistent
-#define BAUD_RATE 9600
+#define BAUD_RATE 115200
 
 // error codes
 #define SUCCESS 1
@@ -49,7 +49,7 @@ void setup()
     delay(1000);
 
     // reset module
-    if (!sendCommand("AT+RST", "Ready")) {
+    if (!sendCommand("AT+RST", "OK")) {
         fail(E_RST);
         return;
     }
@@ -92,6 +92,8 @@ void setup()
 
 void loop()
 {
+    delay(LOOP_RATE);
+
     // setup failed, blink the error code until the user restarts
     // the board
     if (g_failed) {
