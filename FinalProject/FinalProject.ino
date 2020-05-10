@@ -29,6 +29,11 @@ SOFTWARE.
 #define PAGE_MAX 64
 #define CMD_MAX 64
 
+// measurement
+#define WATER_LOW 300
+#define WATER_MID 323
+#define WATER_HIGH 345
+
 // timing
 #define REQUEST_DELAY 20
 #define TIMEOUT 10000
@@ -51,6 +56,7 @@ SOFTWARE.
 #define E_CIPCLOSE 8
 #define E_CIPSEND 9
 #define E_ACCEPT 10
+#define E_FATAL 11
 
 // configuration
 #define AP_SSID "Meeseeks"
@@ -62,6 +68,7 @@ bool sendCommand(char *command, char *ack);
 void fail(int errnum);
 int readNext();
 bool findToken(const char *token);
+const char *descWaterLevel();
 
 // global state
 bool g_failed = false;
@@ -137,9 +144,13 @@ void loop()
 
         // handle HTTP requests
         if (findToken("GET /")) {
+            int waterValue = analogRead(A0);
+            const char *waterLevel = descWaterLevel(waterValue);
+
             // generate web page
             char page[PAGE_MAX] = {0};
-            snprintf(page, sizeof page, "<h1>Hello, World!</h1>%s", CRLF);
+            snprintf(page, sizeof page, "<h1>Water Level: %s, Value: %d</h1>%s",
+                     waterLevel, waterValue, CRLF);
 
             // send CIPSEND command
             char cmd[CMD_MAX] = {0};
@@ -218,6 +229,23 @@ bool findToken(const char *token) {
 void fail(int errnum) {
     g_errnum = errnum;
     g_failed = true;
+}
+
+/** returns a pointer to a string description of the water level */
+const char *descWaterLevel(int sensorVal) {
+
+    if(sensorVal <= WATER_LOW) {
+        return "empty";
+    }
+    else if(sensorVal > WATER_LOW && sensorVal <= WATER_MID) {
+        return "low";
+    }
+    else if(sensorVal > WATER_MID && sensorVal <= WATER_HIGH) {
+        return "medium";
+    }
+    else {
+        return "full";
+    }
 }
 
 /** Blinks the built-in led `nrBlinks' times at `rate' */
