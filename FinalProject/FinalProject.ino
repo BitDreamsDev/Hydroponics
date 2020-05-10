@@ -9,10 +9,6 @@
 #define ERROR_RATE 200
 #define LOOP_RATE 1000
 
-// you should change the baud rate of the ESP 8266, use the following
-// AT command:
-//            AT+UART_DEF=9600,8,1,0,0
-//
 // this change is persistent
 #define BAUD_RATE 115200
 
@@ -36,7 +32,7 @@
 void blink(int nrBlinks, int rate);
 bool sendCommand(char *command, char *ack);
 void fail(int errnum);
-bool waitForTimeout();
+int readNext();
 
 // global state
 bool g_failed = false;
@@ -46,7 +42,7 @@ void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
     Serial.begin(BAUD_RATE);
-    delay(1000);
+    delay(2000);
 
     // reset module
     if (!sendCommand("AT+RST", "OK")) {
@@ -131,47 +127,30 @@ bool sendCommand(const char *command, const char *ack)
     Serial.print(command);
     Serial.print(CRLF);
 
-    // match the acknowledgement:
 
     // scan the stream for the beginning of the response, this also
     // needs its own timeout to prevent denial of service
     unsigned long t1 = millis();
-    for(;;) {
-        // wait for data
-        if (!waitForTimeout()) return false;
 
-        // discard characters until we've found the first in the ack
-        if (ack[0] == Serial.read()) {
-            break;
+    while(1) {
+        // try to match the token
+        int ch, i = 0;
+        while ((ch = readNext()) != -1 && i < strlen(ack)) {
+            if (ch == ack[i]) {
+                i++;
+            } else {
+                i = 0;
+            }
         }
 
-        // check if the specific timeout was exceeded (we should timeout not
-        // only waiting for data here, but waiting for the right data)
-        if (t1 + TIMEOUT < millis()) {
+        if (ch == -1) {
             return false;
         }
-    }
 
-    // ensure the rest of the token is present after that
-    int i = 1;
-    for (; i < strlen(ack) - 1; i++) {
-        // match each character to the next in the stream
-        if (!waitForTimeout()) return false;
-        char ch = Serial.read();
-
-        // if at any point the response doesn't match, fail
-        if (ack[i] != ch) {
-            return false;
+        if (i == strlen(ack)) {
+            return true;
         }
     }
-
-    // We'll be permissive and not check the CRLF here, since it's a PITA
-    // to send a CRLF with PuTTY. We will assume anything after the correct
-    // response is a CRLF. It will be discarded on the next sendCommand()
-    // when we seek to the begginning of the ack.
-
-    // if we reach this point, we have matched the ack
-    return true;
 }
 
 /** fail fast; when there is a problem we'll loop the error code
@@ -193,13 +172,17 @@ void blink(int nrBlinks, int rate)
     }
 }
 
-/** polls serial bus for data until TIMEOUT, returns false on failure
-    to acquire data */
-bool waitForTimeout() {
+/** reads the next character, unless it times out, then returns -1 */
+int readNext() {
     unsigned long t1 = millis();
     bool timedOut = false;
     while (!Serial.available() && !timedOut) {
         timedOut = t1 + TIMEOUT < millis();
     }
-    return !timedOut;
+
+    if (timedOut) {
+        return -1;
+    } else {
+        return Serial.read();
+    }
 }
