@@ -26,8 +26,11 @@ SOFTWARE.
 #define CRLF "\r\n"
 
 // limits
-#define PAGE_MAX 64
+#define PAGE_MAX 256
 #define CMD_MAX 64
+
+// pins
+#define RELAY_PIN 9
 
 // measurement
 #define WATER_LOW 300
@@ -35,7 +38,7 @@ SOFTWARE.
 #define WATER_HIGH 345
 
 // timing
-#define REQUEST_DELAY 20
+#define REQUEST_DELAY 100
 #define TIMEOUT 10000
 #define SUCCESS_RATE 500
 #define ERROR_RATE 200
@@ -73,12 +76,16 @@ const char *descWaterLevel();
 // global state
 bool g_failed = false;
 int g_errnum = 0;
+bool g_pump_state = false;
 
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
     Serial.begin(BAUD_RATE);
     delay(2000);
+
+    // setup relay pin
+    pinMode(RELAY_PIN, OUTPUT);
 
     // reset module
     if (!sendCommand("AT+RST", "OK")) {
@@ -144,13 +151,29 @@ void loop()
 
         // handle HTTP requests
         if (findToken("GET /")) {
+
+            // check if the user is changing the relay state
+            if (findToken("?q=", REQUEST_DELAY) && (ch = readNext()) != -1) {
+                if (ch == '0') {
+                    g_pump_state = false;
+                    digitalWrite(RELAY_PIN, LOW);
+                } else if (ch == '1') {
+                    g_pump_state = true;
+                    digitalWrite(RELAY_PIN, HIGH);
+                }
+            }
+
             int waterValue = analogRead(A0);
             const char *waterLevel = descWaterLevel(waterValue);
 
             // generate web page
             char page[PAGE_MAX] = {0};
-            snprintf(page, sizeof page, "<h1>Water Level: %s, Value: %d</h1>%s",
-                     waterLevel, waterValue, CRLF);
+            snprintf(page, sizeof page, "<h1>Water Level: %s, Value: %d</h1>\n"
+                                        "<h1>Pump State %s</h1>\n"
+                                        "<a href=\"http://192.168.1.195/?q=0\">Pump Off</a>"
+                                        "<br />"
+                                        "<a href=\"http://192.168.1.195/?q=1\">Pump On</a>",
+                     waterLevel, waterValue, g_pump_state ? "On" : "Off");
 
             // send CIPSEND command
             char cmd[CMD_MAX] = {0};
@@ -197,8 +220,8 @@ bool sendCommand(const char *command, const char *ack)
     return findToken(ack);
 }
 
-/** seeks to the next occurrence of token, or times out */
-bool findToken(const char *token) {
+
+bool findToken(const char *token, long timeout) {
     // scan the stream for the beginning of the response, this also
     // needs its own timeout to prevent denial of service
     unsigned long t1 = millis();
@@ -206,7 +229,7 @@ bool findToken(const char *token) {
     while(1) {
         // try to match the token
         int ch, i = 0;
-        while (i < strlen(token) && (ch = readNext()) != -1) {
+        while (i < strlen(token) && (ch = readNext(timeout)) != -1) {
             if (ch == token[i]) {
                 i++;
             } else {
@@ -222,6 +245,11 @@ bool findToken(const char *token) {
             return true;
         }
     }
+}
+
+/** seeks to the next occurrence of token, or times out */
+bool findToken(const char *token) {
+    return findToken(token, TIMEOUT);
 }
 
 /** fail fast; when there is a problem we'll loop the error code
@@ -262,11 +290,15 @@ void blink(int nrBlinks, int rate)
 
 /** reads the next character, unless it times out, then returns -1 */
 int readNext() {
+  return readNext(TIMEOUT);
+}
+
+int readNext(unsigned long timeout) {
     unsigned long t1 = millis();
     bool timedOut = false;
 
     while (!Serial.available() && !timedOut) {
-        timedOut = t1 + TIMEOUT < millis();
+        timedOut = t1 + timeout < millis();
     }
 
     // we don't need to check the timeout here because Serial.read() will
